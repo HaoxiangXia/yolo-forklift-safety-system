@@ -23,15 +23,15 @@ while True:
 
     detected = False
 
-    # ✅ 逐个结果处理
+    # 逐个结果处理
     for r in results:
         if r.boxes is not None and len(r.boxes) > 0:
             detected = True
 
-        # ✅ 关键：绘制检测框（YOLO自带）
+        # 绘制检测框（YOLO自带）
         frame = r.plot()
 
-    # ✅ 报警逻辑
+    # 报警逻辑
     if detected:
         now = time.time()
         if now - last_alarm_time > 1:  # 1秒触发一次
@@ -39,10 +39,10 @@ while True:
             winsound.Beep(1500, 500)
             last_alarm_time = now
 
-    # ✅ 显示带检测框的画面
+    # 显示带检测框的画面
     cv2.imshow("YOLO Alarm", frame)
 
-    if cv2.waitKey(1) == 27:  # ESC退出
+    if cv2.waitKey(1) == 27:  # 按ESC退出
         break
 
 cap.release()

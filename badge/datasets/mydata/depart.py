@@ -2,8 +2,8 @@ import os
 import random
 import shutil
 
-# 定义源文件夹，这里假设你的所有图片都在这个文件夹里喵
-source_folder = R'D:\Py-code\yolo\photos' # <--- 请把这里替换成你的图片文件夹路径
+# 定义源文件夹，这里假设所有图片都在这个文件夹里喵
+source_folder = R'D:\Py-code\yolo\photos' # <--- 请把这里替换成图片文件夹路径
 
 # 定义训练集和测试集的输出文件夹
 train_folder = R'D:\Py-code\yolo\photos\train' # <--- 训练集输出路径
