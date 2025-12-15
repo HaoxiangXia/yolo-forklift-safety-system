@@ -1,0 +1,40 @@
+{
+  "version": "3.3.2",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "1",
+      "score": null,
+      "points": [
+        [
+          1545.0,
+          1404.0
+        ],
+        [
+          2218.0,
+          1404.0
+        ],
+        [
+          2218.0,
+          1826.0
+        ],
+        [
+          1545.0,
+          1826.0
+        ]
+      ],
+      "group_id": null,
+      "description": "",
+      "difficult": false,
+      "shape_type": "rectangle",
+      "flags": {},
+      "attributes": {},
+      "kie_linking": []
+    }
+  ],
+  "imagePath": "IMG_20251202_214121.jpg",
+  "imageData": null,
+  "imageHeight": 3512,
+  "imageWidth": 4096,
+  "description": ""
+}

@@ -1,0 +1,172 @@
+# X-AnyLabeling GPLv3 License - https://github.com/CVHub520/X-AnyLabeling/blob/main/LICENSE
+
+# Overview:
+# This pyproject.toml file manages the build, packaging, and distribution of the X-AnyLabeling library.
+# It defines essential project metadata, dependencies, and settings used to develop and deploy the library.
+
+# Key Sections:
+# - [build-system]: Specifies the build requirements and backend (e.g., setuptools, wheel).
+# - [project]: Includes details like name, version, description, authors, dependencies and more.
+# - [project.optional-dependencies]: Provides additional, optional packages for extended features.
+# - [tool.*]: Configures settings for various tools (pytest, yapf, etc.) used in the project.
+
+# Installation:
+# The X-AnyLabeling library can be installed using the command: 'pip install x-anylabeling-cvhub[xxx]'
+# For development purposes, you MUST specify a runtime environment (includes dev tools):
+#   - CPU:       pip install -e .[cpu]
+#   - CUDA 12.x: pip install -e .[gpu]
+#   - CUDA 11.x: pip install -e .[gpu-cu11]
+# Note: Ensure onnxruntime and onnxruntime-gpu are not installed simultaneously.
+# This approach allows for real-time code modifications without the need for re-installation.
+
+# Docs: https://github.com/CVHub520/X-AnyLabeling/tree/main/docs
+# Examples: https://github.com/CVHub520/X-AnyLabeling/tree/main/examples/
+# GitHub: https://github.com/CVHub520/X-AnyLabeling
+
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# Project settings -----------------------------------------------------------------------------------------------------
+[project]
+name = "x-anylabeling-cvhub"
+dynamic = ["version"]
+description = "Advanced Auto Labeling Solution with Added Features"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { "text" = "GPLv3" }
+keywords = ["machine-learning", "deep-learning", "computer-vision", "multi-modal", "auto-labeling", "image-annotation", "AI", "LLM", "VLM", "YOLO", "SAM", "CLIP", "Grounding-DINO", "X-AnyLabeling"]
+authors = [
+    { name = "Wei Wang", email = "cv_hub@163.com" },
+]
+maintainers = [
+    { name = "CVHub", email = "cvhub.cn@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
+
+# Core dependencies
+# Note: onnx and onnxruntime are in optional-dependencies for version compatibility
+dependencies = [
+    "natsort>=8.1.0",
+    "numpy<=1.26.4",
+    "pillow>=7.1.2",
+    "opencv-contrib-python-headless>=4.7.0.72",
+    "PyQt5>=5.15.7",
+    "PyQtWebEngine>=5.15.7",
+    "qimage2ndarray>=1.10.0",
+    "lapx>=0.5.5",
+    "tqdm>=4.64.0",
+    "scipy>=1.4.1",
+    "PyYAML",
+    "importlib_metadata",
+    "json_repair",
+    "jsonlines",
+    "markdown",
+    "openai",
+    "psutil",
+    "pyclipper",
+    "six",
+    "shapely",
+    "termcolor",
+    "tokenizers",
+    "requests",
+]
+
+# Optional dependencies ------------------------------------------------------------------------------------------------
+[project.optional-dependencies]
+
+dev = [
+    "build",
+    "black",
+    "flake8",
+    "pyinstaller",
+    "pytest",
+    "twine",
+]
+
+# CPU version: Latest ONNX + ONNXRuntime
+cpu = [
+    "onnx>=1.15.0",
+    "onnxruntime>=1.15.0",
+]
+# CUDA 12.x: Latest ONNX + ONNXRuntime GPU (>= 1.18.1 for CUDA 12.x support)
+gpu = [
+    "onnx>=1.15.0",
+    "onnxruntime-gpu>=1.18.1; platform_system != 'Darwin'",
+]
+# CUDA 11.x: ONNX < 1.16.1 + ONNXRuntime GPU < 1.19
+gpu-cu11 = [
+    "onnx>=1.15.0,<1.16.1",
+    "onnxruntime-gpu>=1.15.0,<1.19.0; platform_system != 'Darwin'",
+]
+
+[project.urls]
+"Source" = "https://github.com/CVHub520/X-AnyLabeling"
+"Documentation" = "https://github.com/CVHub520/X-AnyLabeling/tree/main/docs"
+"Bug Reports" = "https://github.com/CVHub520/X-AnyLabeling/issues"
+"Changelog" = "https://github.com/CVHub520/X-AnyLabeling/releases"
+
+[project.scripts]
+xanylabeling = "anylabeling.app:main"
+
+# Tools settings -------------------------------------------------------------------------------------------------------
+[tool.setuptools]  # configuration specific to the `setuptools` build backend.
+packages = { find = { where = ["."], include = ["anylabeling*"], exclude = ["resources*"] } }
+
+[tool.setuptools.dynamic]
+version = {attr = "anylabeling.app_info.__version__"}
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules --durations=30 --color=yes"
+markers = [
+    "slow: skip slow tests unless --slow is set",
+]
+norecursedirs = [".git", "dist", "build"]
+
+[tool.black]
+line-length = 79
+exclude = '''
+/( \\
+    \\.git
+  | \\.hg
+  | \\.mypy_cache
+  | \\.tox
+  | \\.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | tests/
+  | anylabeling/resources/resources\\.py
+)/
+'''
+
+[tool.flake8]
+max-line-length = 79
+max-complexity = 18
+select = ["B", "C", "E", "F", "W", "T4", "B9"]
+ignore = ["E203", "E266", "E501", "W503", "F403", "F401", "B905", "E402"]
+exclude = [
+  ".git",
+  "__pycache__",
+  "build",
+  "dist",
+  ".venv",
+  "anylabeling/resources/resources.py"
+]
