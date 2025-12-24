@@ -1,8 +1,0 @@
-path: D:/Py-code/yolo/badge/datasets/mydata
-
-train: images/train
-val: images/val
-
-names:
-  0: badge
-

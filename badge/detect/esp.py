@@ -18,7 +18,7 @@ from ultralytics import YOLO  # YOLO 模型
 
 MODEL_PATH = "best.pt"        # 训练好的模型
 CAMERA_ID = 0                 # 0 = 笔记本内置摄像头
-SERIAL_PORT = "COM10"          # 改成 ESP32 的端口⚠️ ⚠️ ⚠️ 
+SERIAL_PORT = "COM7"          # 改成 ESP32 的端口⚠️ ⚠️ ⚠️ 
 BAUD_RATE = 115200
 
 CONF_THRES = 0.5              # YOLO 置信度阈值
