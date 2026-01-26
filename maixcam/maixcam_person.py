@@ -3,7 +3,7 @@
 # 功能：只检测 person，连续 N 帧判定，UART状态输出
 
 import sys
-from maix import camera, display, image, nn, uart
+from maix import camera, display, image, nn, uart, pinmap, err
 
 # ===================== 配置参数 =====================
 CONTINUOUS_FRAME_THRESHOLD = 5      # 连续检测 N 帧才判定 DETECTED
@@ -19,8 +19,15 @@ current_state = STATE_NOT_DETECTED
 continuous_frames_count = 0
 
 # UART
+pin_function = {
+    "A19": "UART1_TX",  # UART1 TX
+    "A18": "UART1_RX",  # UART1 RX
+}
+for pin, func in pin_function.items():
+    err.check_raise(pinmap.set_pin_function(pin, func), f"Failed set pin {pin} function to {func}")
+
 try:
-    uart1 = uart.UART(port="/dev/ttyS2", baudrate=115200) 
+    uart1 = uart.UART(port="/dev/ttyS1", baudrate=115200) 
 except Exception as e:
     print("[Serial Error]", e)
 
