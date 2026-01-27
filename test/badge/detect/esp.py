@@ -18,7 +18,7 @@ from ultralytics import YOLO  # YOLO 模型
 
 MODEL_PATH = "best.pt"        # 训练好的模型
 CAMERA_ID = 0                 # 0 = 笔记本内置摄像头
-SERIAL_PORT = "COM7"          # 改成 ESP32 的端口⚠️ ⚠️ ⚠️ 
+SERIAL_PORT = "COM10"          # 改成 ESP32 的端口⚠️ ⚠️ ⚠️ 
 BAUD_RATE = 115200
 
 CONF_THRES = 0.5              # YOLO 置信度阈值
@@ -36,7 +36,7 @@ FRAME_HEIGHT = 720   #480
 def main():
     # ======== 1. 初始化模型 ========
     print("[INFO] 加载 YOLO 模型...")
-    model = YOLO(MODEL_PATH)
+    model = YOLO('best.pt')
 
     # ======== 2. 打开摄像头 ========
     print("[INFO] 打开摄像头...")
