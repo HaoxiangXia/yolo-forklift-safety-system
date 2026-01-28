@@ -5,6 +5,8 @@ import ujson as json # MaixPy4 usually uses ujson for embedded JSON needs
 # ===================== 配置 =====================
 LOG_DIR = "/root/logs"
 FPS_WINDOW_SIZE = 30 # 滑动窗口大小，用于计算窗口平均 FPS
+LOW_FPS_THRESHOLD_FPS = 20.0 # 低于此帧率（例如 20 FPS）计入低帧率统计
+LOW_FPS_TIME_THRESHOLD_S = 1.0 / LOW_FPS_THRESHOLD_FPS # 0.05 秒 (50 毫秒)
 
 class RunLogger:
     """
@@ -27,11 +29,13 @@ class RunLogger:
         self.exit_M = exit_M
 
         # 统计数据
-        self.total_frames = 0
-        self.start_time_s = time.time()
+        self.total_frames = 0           # 总处理帧数
+        self.start_time_s = time.time() # 程序启动时间
+        self.last_frame_time_s = self.start_time_s # 上一帧结束时间，用于计算瞬时帧率/低帧率统计
+        self.low_fps_frames_count = 0   # 帧率低于阈值 (LOW_FPS_THRESHOLD_FPS) 的帧数
         
         # FPS 统计 (滑动窗口)
-        self.frame_times_s = [] 
+        self.frame_times_s = []
         self.min_window_avg_fps = float('inf')
         self.max_window_avg_fps = 0.0
 
@@ -62,6 +66,12 @@ class RunLogger:
         self.frame_times_s.append(current_time)
         self.total_frames += 1
 
+        # 统计低帧率帧（基于帧间隔时间）
+        frame_duration_s = current_time - self.last_frame_time_s
+        if frame_duration_s > LOW_FPS_TIME_THRESHOLD_S:
+            self.low_fps_frames_count += 1 # 帧间隔过长，计为低帧率
+        self.last_frame_time_s = current_time
+        
         self.time_cam_total_s += time_cam
         self.time_nn_total_s += time_nn
         self.time_disp_total_s += time_disp
@@ -151,34 +161,41 @@ YOLO 推理平均耗时: {avg_nn_ms:.2f} ms
 """
         return log_content
 
-    def _generate_csv_log(self, total_avg_fps: float, avg_cam_ms: float, avg_nn_ms: float, avg_disp_ms: float, avg_other_ms: float) -> str:
-        """生成核心指标的 CSV 日志内容"""
+    def _generate_csv_log(self, total_avg_fps: float, avg_nn_ms: float, avg_disp_ms: float, low_fps_ratio: float) -> str:
+        """生成核心指标的 CSV 日志内容 (包含 12 项指定指标)"""
         
         min_fps_display = self.min_window_avg_fps if self.min_window_avg_fps != float('inf') else 0.0
         
-        # 核心指标（10 列以内）
+        # 定义 CSV 头部，包含 12 项指定指标，顺序与用户要求一致，配置项优先
         header = [
-            "timestamp_start", "model_name", "input_res", "total_frames", 
-            "total_runtime_s", "avg_fps", "max_window_fps", "min_window_fps", 
-            "avg_nn_ms", "intrusion_enters", "false_trigger_rollbacks" # 10列以内，这里是11列，将input_res去掉，或者将total_runtime_s计算出来再传入
+            "model_name",                   # 模型名称
+            "imgsz",                        # 输入分辨率 (例如 832)
+            "N",                            # 状态机 N (进入阈值)
+            "M",                            # 状态机 M (退出阈值)
+            "avg_fps",                      # 总平均 FPS
+            "min_fps_window",               # 窗口最小平均 FPS
+            "low_fps_ratio",                # 低于阈值 FPS 的帧数占比 (%)
+            "detect_ms_avg",                # YOLO 推理平均耗时 (ms)
+            "display_ms_avg",               # 显示/绘制平均耗时 (ms)
+            "enter_cnt",                    # 状态机进入次数
+            "exit_cnt",                     # 状态机退出次数
+            "rollback_cnt",                 # 误触发回滚次数
         ]
         
-        # 重新选择 10 列核心指标
-        header = [
-            "timestamp_start", "model_name", "total_frames", "total_runtime_s", 
-            "avg_fps", "max_window_fps", "min_window_fps", "avg_nn_ms", 
-            "intrusion_enters", "false_trigger_rollbacks"
-        ]
-        
-        total_run_time_s = time.time() - self.start_time_s
-        
+        # 准备数据行
         data = [
-            self.timestamp, self.model_name, self.total_frames, f"{total_run_time_s:.2f}",
-            f"{total_avg_fps:.2f}", 
-            f"{self.max_window_avg_fps:.2f}", 
-            f"{min_fps_display:.2f}", 
+            self.model_name,
+            self.input_res,
+            self.enter_N,
+            self.exit_M,
+            f"{total_avg_fps:.2f}",
+            f"{min_fps_display:.2f}",
+            f"{low_fps_ratio:.2f}",
             f"{avg_nn_ms:.2f}",
-            self.intrusion_enters, self.false_trigger_rollbacks
+            f"{avg_disp_ms:.2f}",
+            self.intrusion_enters,
+            self.intrusion_exits,
+            self.false_trigger_rollbacks
         ]
         
         csv_content = ",".join(header) + "\n" + ",".join(map(str, data))
@@ -204,8 +221,12 @@ YOLO 推理平均耗时: {avg_nn_ms:.2f} ms
 
         # 2. 生成日志内容
         log_content = self._generate_text_log(end_time_s, total_run_time_s)
-        avg_other_ms = (self.time_other_total_s / num_frames) * 1000
-        csv_content = self._generate_csv_log(total_avg_fps, avg_cam_ms, avg_nn_ms, avg_disp_ms, avg_other_ms)
+        avg_other_ms = (self.time_other_total_s / num_frames) * 1000 # 其他逻辑平均耗时
+        
+        # 新增：计算低帧率占比 (低于 LOW_FPS_THRESHOLD_FPS 的帧数 / 总帧数)
+        low_fps_ratio = (self.low_fps_frames_count / num_frames) * 100.0 if num_frames > 0 else 0.0
+        
+        csv_content = self._generate_csv_log(total_avg_fps, avg_nn_ms, avg_disp_ms, low_fps_ratio)
 
         # 3. 写入文件
         try:
