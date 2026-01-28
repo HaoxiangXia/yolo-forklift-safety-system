@@ -4,7 +4,7 @@ MaixCAM 人员入侵检测系统 - 全局配置常量
 
 # ===================== 模型配置 =====================
 MODEL_PATH = "/root/models/yolo11n.mud"  # YOLO 官方模型 (YOLOv11n)
-INPUT_SIZE = 832                         # 输入分辨率 imgsz 设置为 832
+INPUT_SIZE = 832                         # 输入分辨率 
 PERSON_CLASS_ID = 0                      # COCO: person = 0 (仅检测 person)
 CONFIDENCE_THRESHOLD = 0.5               # 置信度阈值
 IOU_THRESHOLD = 0.45                     # IOU 阈值
