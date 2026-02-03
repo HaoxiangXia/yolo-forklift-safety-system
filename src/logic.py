@@ -20,6 +20,7 @@ class StateMachine:
         self.enter_frame_count = 0
         self.exit_frame_count = 0
         self.on_state_change = on_state_change
+        self._is_rollback = False # 新增私有属性用于存储is_rollback状态
 
     def update(self, person_detected: bool) -> bool:
         """
@@ -30,6 +31,7 @@ class StateMachine:
             bool: 状态是否发生变化。
         """
         new_state = self.current_state
+        self._is_rollback = False # 每次更新前重置
 
         if person_detected:
             # 检测到人: 增加进入计数, 重置退出计数
@@ -52,13 +54,13 @@ class StateMachine:
         # 检查状态是否发生变化
         if new_state != self.current_state:
             # 判断是否为误触发回滚（进入后很快退出）
-            is_rollback = (self.current_state == config.STATE_INTRUSION and new_state == config.STATE_IDLE and self.enter_frame_count < config.ENTER_THRESHOLD_N)
+            self._is_rollback = (self.current_state == config.STATE_INTRUSION and new_state == config.STATE_IDLE and self.enter_frame_count < config.ENTER_THRESHOLD_N)
             
             self.current_state = new_state
             
             # 调用状态切换回调
             if self.on_state_change:
-                self.on_state_change(new_state, is_rollback)
+                self.on_state_change(new_state, self._is_rollback, self.current_state, self.enter_frame_count, self.exit_frame_count)
             
             return True
         
@@ -79,3 +81,11 @@ class StateMachine:
             tuple: (enter_frame_count, exit_frame_count)
         """
         return (self.enter_frame_count, self.exit_frame_count)
+
+    def get_is_rollback(self) -> bool:
+        """
+        获取当前帧是否发生回滚。
+        Returns:
+            bool: 是否为回滚状态。
+        """
+        return self._is_rollback

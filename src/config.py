@@ -20,3 +20,6 @@ UART_PORT = "/dev/ttyS1"
 UART_BAUDRATE = 115200
 UART_TX_PIN = "A19"
 UART_RX_PIN = "A18"
+
+# ===================== Debug 配置 =====================
+DEBUG = False # True: 开启调试模式，输出额外的调试信息；False: 关闭调试模式，仅输出关键日志和事件

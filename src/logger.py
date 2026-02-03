@@ -1,12 +1,31 @@
 import time
 import os
 import ujson as json # MaixPy4 usually uses ujson for embedded JSON needs
+import config # 导入config模块以获取DEBUG配置
 
 # ===================== 配置 =====================
 LOG_DIR = "/root/logs"
 FPS_WINDOW_SIZE = 30 # 滑动窗口大小，用于计算窗口平均 FPS
 LOW_FPS_THRESHOLD_FPS = 20.0 # 低于此帧率（例如 20 FPS）计入低帧率统计
 LOW_FPS_TIME_THRESHOLD_S = 1.0 / LOW_FPS_THRESHOLD_FPS # 0.05 秒 (50 毫秒)
+
+# ===================== 事件日志配置 =====================
+EVENT_STATE_CHANGE = "STATE_CHANGE"
+EVENT_INIT_FAILURE = "INIT_FAILURE"
+EVENT_UART_ERROR = "UART_ERROR"
+EVENT_RUNTIME_ERROR = "RUNTIME_ERROR"
+
+
+def debug_print(*args, **kwargs):
+    """
+    Debug模式下的print输出，受config.DEBUG控制。
+    Args:
+        *args: 传递给print的参数
+        **kwargs: 传递给print的关键字参数
+    """
+    if config.DEBUG:
+        print("[DEBUG]", *args, **kwargs)
+
 
 class RunLogger:
     """
@@ -111,6 +130,91 @@ class RunLogger:
         
         if is_rollback:
             self.false_trigger_rollbacks += 1
+
+    def _log_event(self, event_type: str, trigger_reason: str, prev_state=None, new_state=None,
+                   person_count=None, state_counter=None, extra=None):
+        """
+        记录事件日志，使用结构化输出
+        Args:
+            event_type: 事件类型
+            trigger_reason: 触发原因
+            prev_state: 前一状态（可选）
+            new_state: 新状态（可选）
+            person_count: 检测到的人数（可选）
+            state_counter: 状态机计数（可选）
+            extra: 额外信息（可选）
+        """
+        event_log = {
+            "timestamp_ms": int(time.time() * 1000),
+            "event_type": event_type,
+            "trigger_reason": trigger_reason,
+            "prev_state": prev_state,
+            "new_state": new_state,
+            "person_count": person_count,
+            "state_counter": state_counter,
+            "extra": extra
+        }
+        
+        # 使用key=value格式输出，便于嵌入式系统解析
+        log_parts = []
+        for key, value in event_log.items():
+            if value is not None:
+                log_parts.append(f"{key}={value}")
+            else:
+                log_parts.append(f"{key}=None")
+        
+        print("[EVENT] " + " ".join(log_parts))
+
+    def log_state_change(self, prev_state: int, new_state: int, trigger_reason: str,
+                        person_count: int = 0, state_counter: int = 0, extra: str = ""):
+        """
+        记录状态机切换事件
+        Args:
+            prev_state: 前一状态
+            new_state: 新状态
+            trigger_reason: 触发原因
+            person_count: 检测到的人数
+            state_counter: 状态机计数
+            extra: 额外信息
+        """
+        self._log_event(
+            event_type=EVENT_STATE_CHANGE,
+            trigger_reason=trigger_reason,
+            prev_state=prev_state,
+            new_state=new_state,
+            person_count=person_count,
+            state_counter=state_counter,
+            extra=extra
+        )
+
+    def log_init_failure(self, component: str, reason: str, extra: str = ""):
+        """
+        记录初始化失败事件
+        Args:
+            component: 失败的组件（camera/model/uart等）
+            reason: 失败原因
+            extra: 额外信息
+        """
+        self._log_event(
+            event_type=EVENT_INIT_FAILURE,
+            trigger_reason=f"{component}_init_failed",
+            extra=f"reason={reason}" + (f";{extra}" if extra else "")
+        )
+
+    def log_error(self, error_type: str, reason: str, extra: str = ""):
+        """
+        记录运行错误事件
+        Args:
+            error_type: 错误类型（uart/runtime等）
+            reason: 错误原因
+            extra: 额外信息
+        """
+        event_type = EVENT_UART_ERROR if error_type == "uart" else EVENT_RUNTIME_ERROR
+        self._log_event(
+            event_type=event_type,
+            trigger_reason=reason,
+            extra=extra
+        )
 
     def _generate_text_log(self, end_time_s: float, total_run_time_s: float) -> str:
         """生成结构化的文本日志内容 (.log)"""
