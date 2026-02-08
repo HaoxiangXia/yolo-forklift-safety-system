@@ -1,2 +1,6 @@
 # 日志
 logs/
+
+# yolo模型
+*.pt
+*.onnx
