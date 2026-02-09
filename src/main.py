@@ -47,10 +47,8 @@ print("[INFO] 开始初始化 MaixCAM 系统...")
 
 # 1. 初始化日志模块
 logger = RunLogger(
-    model_name="YOLOv11n",
-    input_res=config.INPUT_SIZE,
-    enter_N=config.CENTER_ON_FRAMES,
-    exit_M=config.CENTER_OFF_FRAMES
+    model_path=config.MODEL_PATH,
+    input_res=config.INPUT_SIZE
 )
 print("[OK] 日志模块初始化成功")
 

@@ -19,9 +19,9 @@ EVENT_RUNTIME_ERROR = "RUNTIME_ERROR"
 
 def debug_print(*args, **kwargs):
     """
-    仅在 DEBUG 模式下打印
+    仅在 config.DEBUG 为 True 时打印调试信息。
     """
-    if config.DEBUG:
+    if getattr(config, 'DEBUG', False):
         print("[DEBUG]", *args, **kwargs)
 
 
@@ -29,16 +29,14 @@ class RunLogger:
     """
     运行日志与性能统计：
     - 记录配置与性能数据
-    - 记录状态机事件
-    - 写入 .log 和 .csv 文件
+    - 记录状态机事件 (控制台输出 + 文件追加)
+    - 退出时写入汇总 .log 和 .csv 文件
     """
 
-    def __init__(self, model_name: str, input_res: int, enter_N: int, exit_M: int):
+    def __init__(self, model_path: str, input_res: int):
         # 基础信息
-        self.model_name = model_name
+        self.model_path = model_path
         self.input_res = input_res
-        self.enter_N = enter_N
-        self.exit_M = exit_M
 
         # 运行统计
         self.total_frames = 0
@@ -63,7 +61,16 @@ class RunLogger:
         self.false_trigger_rollbacks = 0
 
         # 用于日志文件名的系统时间戳
-        self.timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        lt = time.localtime()
+        self.timestamp = time.strftime("%Y%m%d_%H%M%S", lt)  #格式YYYYMMDD_HHMMSS
+        
+        # 事件日志文件路径
+        if not os.path.exists(LOG_DIR):
+            try:
+                os.makedirs(LOG_DIR)
+            except:
+                pass
+        self.event_log_path = os.path.join(LOG_DIR, f"events_{self.timestamp}.log")
 
     def record_frame(self, time_cam: float, time_nn: float, time_disp: float, time_other: float):
         """记录每帧耗时并更新 FPS 统计。"""
@@ -112,7 +119,10 @@ class RunLogger:
                    center_raw=None, outer_raw=None, center_state=None, outer_state=None,
                    alarm_state=None, center_counter=None, outer_counter=None, extra=None):
         """
-        统一的事件日志输出，适配双状态机字段。
+        统一的事件日志输出。
+        - 格式：key=value 单行字符串
+        - 输出：控制台 print + 追加写入 events_*.log 文件
+        - 字段：固定 13 个字段，不适用填 None
         """
         event_log = {
             "timestamp_ms": int(time.time() * 1000),
@@ -130,11 +140,21 @@ class RunLogger:
             "extra": extra,
         }
 
-        # 使用 key=value 格式输出，方便解析
+        # 序列化为 key=value 格式
         log_parts = []
         for key, value in event_log.items():
             log_parts.append(f"{key}={value}")
-        print("[EVENT] " + " ".join(log_parts))
+        log_line = "[EVENT] " + " ".join(log_parts)
+        
+        # 1. 控制台输出 (不受 config.DEBUG 影响)
+        print(log_line)
+        
+        # 2. 追加写入文件
+        try:
+            with open(self.event_log_path, "a") as f:
+                f.write(log_line + "\n")
+        except:
+            pass
 
     def log_state_change(self, prev_state: int, new_state: int, trigger_reason: str,
                          center_raw=None, outer_raw=None, center_state=None, outer_state=None,
@@ -189,7 +209,7 @@ class RunLogger:
         )
 
     def _generate_text_log(self, end_time_s: float, total_run_time_s: float) -> str:
-        """生成可读的 .log 文本内容。"""
+        """生成汇总 .log 文本内容。"""
         num_frames = self.total_frames if self.total_frames > 0 else 1
         avg_cam_ms = (self.time_cam_total_s / num_frames) * 1000
         avg_nn_ms = (self.time_nn_total_s / num_frames) * 1000
@@ -205,10 +225,14 @@ class RunLogger:
 结束时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time_s))}
 
 -------------------- 配置 --------------------
-模型: {self.model_name}
+模型路径: {self.model_path}
 输入分辨率: {self.input_res}x{self.input_res}
-状态 N (进入): {self.enter_N}
-状态 M (退出): {self.exit_M}
+ROI 中心宽度占比: {getattr(config, 'ROI_CENTER_W_RATIO', 'None')}
+ROI 中心高度占比: {getattr(config, 'ROI_CENTER_H_RATIO', 'None')}
+中心进入帧数 (CENTER_ON): {getattr(config, 'CENTER_ON_FRAMES', 'None')}
+中心退出帧数 (CENTER_OFF): {getattr(config, 'CENTER_OFF_FRAMES', 'None')}
+外围进入帧数 (OUTER_ON): {getattr(config, 'OUTER_ON_FRAMES', 'None')}
+外围退出帧数 (OUTER_OFF): {getattr(config, 'OUTER_OFF_FRAMES', 'None')}
 
 -------------------- 运行时统计 --------------------
 总帧数: {self.total_frames}
@@ -234,14 +258,16 @@ class RunLogger:
         return log_content
 
     def _generate_csv_log(self, total_avg_fps: float, avg_nn_ms: float, avg_disp_ms: float, low_fps_ratio: float) -> str:
-        """生成 .csv 摘要内容。"""
+        """生成汇总 .csv 内容。"""
         min_fps_display = self.min_window_avg_fps if self.min_window_avg_fps != float("inf") else 0.0
 
         header = [
-            "model_name",
+            "model_path",
             "imgsz",
-            "N",
-            "M",
+            "center_on",
+            "center_off",
+            "outer_on",
+            "outer_off",
             "avg_fps",
             "min_fps_window",
             "low_fps_ratio",
@@ -253,10 +279,12 @@ class RunLogger:
         ]
 
         data = [
-            self.model_name,
+            self.model_path,
             self.input_res,
-            self.enter_N,
-            self.exit_M,
+            getattr(config, 'CENTER_ON_FRAMES', 'None'),
+            getattr(config, 'CENTER_OFF_FRAMES', 'None'),
+            getattr(config, 'OUTER_ON_FRAMES', 'None'),
+            getattr(config, 'OUTER_OFF_FRAMES', 'None'),
             f"{total_avg_fps:.2f}",
             f"{min_fps_display:.2f}",
             f"{low_fps_ratio:.2f}",
@@ -270,12 +298,12 @@ class RunLogger:
         return ",".join(header) + "\n" + ",".join(map(str, data))
 
     def write_log(self):
-        """退出时写入 .log 和 .csv 文件。"""
+        """退出时写入汇总日志文件。"""
         end_time_s = time.time()
         total_run_time_s = end_time_s - self.start_time_s
 
         if self.total_frames == 0 or total_run_time_s < 0.1:
-            print("[Logger] 帧数不足，跳过日志文件写入。")
+            print("[Logger] 帧数不足，跳过汇总日志写入。")
             return
 
         # 计算平均值
@@ -298,15 +326,17 @@ class RunLogger:
             if not os.path.exists(LOG_DIR):
                 os.makedirs(LOG_DIR)
 
-            log_file_path = os.path.join(LOG_DIR, f"run_{self.timestamp}.log")
-            with open(log_file_path, "w") as f:
+            # 写入 run_*.log
+            sum_log_path = os.path.join(LOG_DIR, f"run_{self.timestamp}.log")
+            with open(sum_log_path, "w") as f:
                 f.write(log_content)
-            print(f"[Logger] 日志已保存: {log_file_path}")
+            print(f"[Logger] 汇总日志已保存: {sum_log_path}")
 
+            # 写入 summary_*.csv
             csv_file_path = os.path.join(LOG_DIR, f"summary_{self.timestamp}.csv")
             with open(csv_file_path, "w") as f:
                 f.write(csv_content)
-            print(f"[Logger] CSV 已保存: {csv_file_path}")
+            print(f"[Logger] CSV 摘要已保存: {csv_file_path}")
 
         except Exception as e:
             print(f"[Logger FATAL] 写入日志失败: {e}")
