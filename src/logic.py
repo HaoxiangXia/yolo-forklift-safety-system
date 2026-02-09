@@ -1,91 +1,104 @@
 """
 MaixCAM 人员入侵检测系统 - 状态机逻辑模块
-封装“进入计数 N=5 / 退出计数 M=8”状态机逻辑
+中心 ROI + 外围 ROI 双状态机
 """
 
+# -*- coding: utf-8 -*-
 import config
 
-class StateMachine:
+class DebounceStateMachine:
     """
-    状态机类：实现“进入计数 N=5 / 退出计数 M=8”逻辑，并提供状态切换回调。
+    用于将 raw 信号转换为稳定 state 的简单去抖状态机。
     """
 
-    def __init__(self, on_state_change=None):
-        """
-        初始化状态机。
-        Args:
-            on_state_change (callable, optional): 状态切换时的回调函数，参数为 (new_state, is_rollback)。
-        """
-        self.current_state = config.STATE_IDLE
-        self.enter_frame_count = 0
-        self.exit_frame_count = 0
-        self.on_state_change = on_state_change
-        self._is_rollback = False # 新增私有属性用于存储is_rollback状态
+    def __init__(self, on_frames: int, off_frames: int, initial_state: bool = False):
+        self.on_frames = max(1, int(on_frames))
+        self.off_frames = max(1, int(off_frames))
+        self.state = bool(initial_state)
+        self._on_count = 0
+        self._off_count = 0
 
-    def update(self, person_detected: bool) -> bool:
+    def update(self, raw: bool) -> bool:
         """
-        根据检测结果更新状态机，返回状态是否发生变化。
-        Args:
-            person_detected (bool): 是否检测到 person。
-        Returns:
-            bool: 状态是否发生变化。
+        使用 raw 信号更新状态机，并返回状态是否发生变化。"
         """
-        new_state = self.current_state
-        self._is_rollback = False # 每次更新前重置
-
-        if person_detected:
-            # 检测到人: 增加进入计数, 重置退出计数
-            self.enter_frame_count += 1
-            self.exit_frame_count = 0
-
-            # 只有在 Idle 状态下，达到 N 阈值才切换到 Intrusion
-            if self.current_state == config.STATE_IDLE and self.enter_frame_count >= config.ENTER_THRESHOLD_N:
-                new_state = config.STATE_INTRUSION
-                
+        changed = False
+        if raw:
+            # Consecutive hit count
+            self._on_count += 1
+            self._off_count = 0
+            if not self.state and self._on_count >= self.on_frames:
+                self.state = True
+                changed = True
         else:
-            # 未检测到人: 增加退出计数, 重置进入计数
-            self.enter_frame_count = 0
-            self.exit_frame_count += 1
+            # Consecutive miss count
+            self._off_count += 1
+            self._on_count = 0
+            if self.state and self._off_count >= self.off_frames:
+                self.state = False
+                changed = True
+        return changed
 
-            # 只有在 Intrusion 状态下，达到 M 阈值才切换到 Idle
-            if self.current_state == config.STATE_INTRUSION and self.exit_frame_count >= config.EXIT_THRESHOLD_M:
-                new_state = config.STATE_IDLE
 
-        # 检查状态是否发生变化
-        if new_state != self.current_state:
-            # 判断是否为误触发回滚（进入后很快退出）
-            self._is_rollback = (self.current_state == config.STATE_INTRUSION and new_state == config.STATE_IDLE and self.enter_frame_count < config.ENTER_THRESHOLD_N)
-            
-            self.current_state = new_state
-            
-            # 调用状态切换回调
-            if self.on_state_change:
-                self.on_state_change(new_state, self._is_rollback, self.current_state, self.enter_frame_count, self.exit_frame_count)
-            
-            return True
-        
-        return False
+class DualROIAlarm:
+    """
+    中心/外围 ROI 分类 + 双去抖状态机 + 最终报警判定
+    """
 
-    def get_state(self):
-        """
-        获取当前状态。
-        Returns:
-            int: 当前状态（STATE_IDLE 或 STATE_INTRUSION）。
-        """
-        return self.current_state
+    def __init__(self):
+        self.center_sm = DebounceStateMachine(config.CENTER_ON_FRAMES, config.CENTER_OFF_FRAMES)
+        self.outer_sm = DebounceStateMachine(config.OUTER_ON_FRAMES, config.OUTER_OFF_FRAMES)
+        self.alarm_state = False
 
-    def get_counts(self):
+    def get_roi_rect(self, frame_w: int, frame_h: int):
         """
-        获取当前计数信息。
-        Returns:
-            tuple: (enter_frame_count, exit_frame_count)
+        根据比例计算中心 ROI 矩形区域
         """
-        return (self.enter_frame_count, self.exit_frame_count)
+        w = int(frame_w * config.ROI_CENTER_W_RATIO)
+        h = int(frame_h * config.ROI_CENTER_H_RATIO)
+        if w < 1:
+            w = 1
+        if h < 1:
+            h = 1
+        x = int((frame_w - w) / 2)
+        y = int((frame_h - h) / 2)
+        return x, y, w, h
 
-    def get_is_rollback(self) -> bool:
+    def _classify(self, boxes, frame_w: int, frame_h: int):
         """
-        获取当前帧是否发生回滚。
-        Returns:
-            bool: 是否为回滚状态。
+        根据框中心点将检测框分类到中心/外围 ROI
         """
-        return self._is_rollback
+        x, y, w, h = self.get_roi_rect(frame_w, frame_h)
+        x2 = x + w
+        y2 = y + h
+        center_raw = False
+        outer_raw = False
+        for box in boxes:
+            cx = box.x + (box.w / 2)
+            cy = box.y + (box.h / 2)
+            if (x <= cx <= x2) and (y <= cy <= y2):
+                center_raw = True
+            else:
+                outer_raw = True
+            if center_raw and outer_raw:
+                break
+        return center_raw, outer_raw
+
+    def update(self, boxes, frame_w: int, frame_h: int):
+        """
+        主API: 返回 raw、state、alarm、state_changed。
+        """
+        center_raw, outer_raw = self._classify(boxes, frame_w, frame_h)
+
+        # 更新双状态机
+        self.center_sm.update(center_raw)
+        self.outer_sm.update(outer_raw)
+
+        center_state = self.center_sm.state
+        outer_state = self.outer_sm.state
+        alarm_state = bool(center_state and outer_state)
+
+        state_changed = (alarm_state != self.alarm_state)
+        self.alarm_state = alarm_state
+
+        return center_raw, outer_raw, center_state, outer_state, alarm_state, state_changed
