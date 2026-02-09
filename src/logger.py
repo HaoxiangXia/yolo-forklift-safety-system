@@ -2,11 +2,11 @@
 import os
 import time
 import ujson as json # MaixPy4 通常使用 ujson 处理嵌入式 JSON 需求
-import config # 导入 config 模块以获取 DEBUG 配置
+import config
 
 # ===================== 配置 =====================
 LOG_DIR = "/root/logs"
-FPS_WINDOW_SIZE = 30  # 滑动窗口大小，用于计算窗口平均 FPS
+FPS_WINDOW_SIZE = 25  # 滑动窗口大小，用于计算窗口平均 FPS
 LOW_FPS_THRESHOLD_FPS = 20.0  # 低帧率阈值
 LOW_FPS_TIME_THRESHOLD_S = 1.0 / LOW_FPS_THRESHOLD_FPS  # 低 FPS 的时间阈值
 
@@ -234,7 +234,7 @@ ROI 中心高度占比: {getattr(config, 'ROI_CENTER_H_RATIO', 'None')}
 外围进入帧数 (OUTER_ON): {getattr(config, 'OUTER_ON_FRAMES', 'None')}
 外围退出帧数 (OUTER_OFF): {getattr(config, 'OUTER_OFF_FRAMES', 'None')}
 
--------------------- 运行时统计 --------------------
+-------------------- 运行统计 --------------------
 总帧数: {self.total_frames}
 运行总时长: {total_run_time_s:.2f} s
 
@@ -243,7 +243,7 @@ ROI 中心高度占比: {getattr(config, 'ROI_CENTER_H_RATIO', 'None')}
 窗口最大 FPS: {self.max_window_avg_fps:.2f}
 窗口最小 FPS: {min_fps_display:.2f}
 
--------------------- 阶段耗时 (平均 / ms) --------------------
+-------------------- 阶段平均耗时 (ms) --------------------
 摄像头: {avg_cam_ms:.2f} ms
 模型推理: {avg_nn_ms:.2f} ms
 显示渲染: {avg_disp_ms:.2f} ms
