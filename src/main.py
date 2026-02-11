@@ -11,15 +11,8 @@ from detector import Detector
 from logic import DualROIAlarm
 from logger import RunLogger, debug_print
 
-
-# --- UART 优化部分 ---
-# 预缓存常用包
-# ALARM:1 -> A(65)+L(76)+A(65)+R(82)+M(77)+:(58)+1(49) = 472 % 256 = 216 (D8)
-MSG_ALARM_ON = b"<ALARM:1,D8>"
-# ALARM:0 -> A(65)+L(76)+A(65)+R(82)+M(77)+:(58)+0(48) = 471 % 256 = 215 (D7)
-MSG_ALARM_OFF = b"<ALARM:0,D7>"
-# HB -> H(72)+B(66) = 138 % 256 = 138 (8A)
-MSG_HB = b"<HB,8A>"
+# ===================== 全局变量 =====================
+LAST_HEARTBEAT_TIME_S = 0.0     # 心跳包时间戳（上次发送时间）
 
 def calculate_checksum(data):
     """计算轻量级校验和：所有字节累加对 256 取模。"""
@@ -34,11 +27,11 @@ def send_packet(cmd_data):
 
     try:
         if cmd_data == "ALARM:1":
-            packet = MSG_ALARM_ON
+            packet = config.MSG_ALARM_ON
         elif cmd_data == "ALARM:0":
-            packet = MSG_ALARM_OFF
+            packet = config.MSG_ALARM_OFF
         elif cmd_data == "HB":
-            packet = MSG_HB
+            packet = config.MSG_HB
         else:
             # 动态构建
             checksum = calculate_checksum(cmd_data)
@@ -158,14 +151,10 @@ try:
         for box in person_boxes:
             img.draw_rect(box.x, box.y, box.w, box.h, color=image.COLOR_RED, thickness=2)
 
-        # 3.1 定期发送心跳包 (例如每 5 秒)
-        if 'last_hb_time' not in globals():
-            global last_hb_time
-            last_hb_time = 0
-        
-        if time.time() - last_hb_time > 5.0:
+        # 3.1 定期发送心跳包
+        if frame_start_s - LAST_HEARTBEAT_TIME_S > config.HEARTBEAT_INTERVAL_S:
             send_packet("HB")
-            last_hb_time = time.time()
+            LAST_HEARTBEAT_TIME_S = frame_start_s
 
         # 4. 状态机逻辑判定
         frame_w = img.width()
