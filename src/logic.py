@@ -25,16 +25,16 @@ class DebounceStateMachine:
         changed = False
         if raw:
             # Consecutive hit count
-            self._on_count += 1
-            self._off_count = 0
-            if not self.state and self._on_count >= self.on_frames:
+            self.on_count += 1
+            self.off_count = 0
+            if not self.state and self.on_count >= self.on_frames:
                 self.state = True
                 changed = True
         else:
             # Consecutive miss count
-            self._off_count += 1
-            self._on_count = 0
-            if self.state and self._off_count >= self.off_frames:
+            self.off_count += 1
+            self.on_count = 0
+            if self.state and self.off_count >= self.off_frames:
                 self.state = False
                 changed = True
         return changed
