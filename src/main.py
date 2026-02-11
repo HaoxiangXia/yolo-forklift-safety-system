@@ -147,16 +147,7 @@ try:
         person_count = len(person_boxes)
         debug_print(f"Detected {person_count} persons in {nn_time_s*1000:.2f} ms. Boxes: {[str(box) for box in person_boxes]}")
 
-        # 3. 绘制检测框
-        for box in person_boxes:
-            img.draw_rect(box.x, box.y, box.w, box.h, color=image.COLOR_RED, thickness=2)
-
-        # 3.1 定期发送心跳包
-        if frame_start_s - LAST_HEARTBEAT_TIME_S > config.HEARTBEAT_INTERVAL_S:
-            send_packet("HB")
-            LAST_HEARTBEAT_TIME_S = frame_start_s
-
-        # 4. 状态机逻辑判定
+        # 3. 状态机逻辑判定
         frame_w = img.width()
         frame_h = img.height()
         # 最小接入: 在调用 update 前获取状态信息
@@ -192,7 +183,13 @@ try:
                 trigger_reason=trigger_reason
             )
 
-        # 5. UI
+
+        # 4. 绘制图像
+        # 检测框
+        for box in person_boxes:
+            img.draw_rect(box.x, box.y, box.w, box.h, color=image.COLOR_RED, thickness=2)
+
+        # UI
         disp_start_s = time.time()
 
         # 中心ROI
@@ -208,10 +205,15 @@ try:
         img.draw_string(10, 50, f"Outer: {int(outer_raw)}/{int(outer_state)}", color=outer_color, scale=2)
         img.draw_string(10, 90, f"Alarm: {int(alarm_state)}", color=alarm_color, scale=2)
 
-        # 6. 显示最终图像
+        # 5. 显示最终图像
         disp.show(img)
         disp_end_s = time.time()
         disp_time_s = disp_end_s - disp_start_s
+
+        # 6 定期发送心跳包
+        if disp_end_s - LAST_HEARTBEAT_TIME_S > config.HEARTBEAT_INTERVAL_S:
+            send_packet("HB")
+            LAST_HEARTBEAT_TIME_S = frame_start_s
         
         # 7. 记录本帧耗时到日志模块
         other_time_s = (time.time() - frame_start_s) - (cam_time_s + nn_time_s + disp_time_s)
