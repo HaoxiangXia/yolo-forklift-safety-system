@@ -49,7 +49,7 @@ void setup() {
       Serial.println("OLED初始化失败！");
       while (1);
   }
-  oled.showSerialMessage("System Ready!");
+  oled.println("System Ready!");
 }
 
 /**
@@ -88,6 +88,7 @@ void parsePacket(char* packet, uint8_t len) {
     
     if (receivedSum != calculatedSum) {
       Serial.println("[UART_ERROR] Checksum mismatch!");
+      oled.println("[UART_ERROR] Checksum mismatch!");
       return;
     }
     // 校验通过，dataStart 现在指向的是纯数据部分
@@ -111,7 +112,7 @@ void parsePacket(char* packet, uint8_t len) {
     heartbeat_alive = true;
     last_heartbeat_time = millis();
     Serial.println("[UART] Heartbeat");
-    oled.showSerialMessage("[UART] Heartbeat");
+    oled.println("[UART] Heartbeat");
   }
   else {
     Serial.print("[UART] Unknown packet data: ");
