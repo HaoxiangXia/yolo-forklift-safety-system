@@ -1,9 +1,15 @@
+#include <Arduino.h>
+#include "OLED_Display.h"
+
 #define OUT_PIN           2      // D2 输出
 #define BUZZER_PIN        4      // 有源蜂鸣器（低电平触发）
 #define KEY_PIN           15     // 按键
 #define MAX_PACKET_LEN    64     // 最大包长度（字节）
 #define PACKET_TIMEOUT_MS 100    // 包接收超时（毫秒）
 #define HEARTBEAT_TIMEOUT 5000   // 心跳超时时间（毫秒）
+
+// 创建OLED对象，使用默认引脚21(SDA)、22(SCL)，地址0x3C
+OLED_Display oled;
 
 // 接收状态机状态定义
 enum UartState {
@@ -37,6 +43,13 @@ void setup() {
 
   last_heartbeat_time = millis();
   heartbeat_alive = true; //避免开机就报警
+
+  // 初始化OLED
+  if (!oled.begin()) {
+      Serial.println("OLED初始化失败！");
+      while (1);
+  }
+  oled.showSerialMessage("System Ready!");
 }
 
 /**
@@ -98,6 +111,7 @@ void parsePacket(char* packet, uint8_t len) {
     heartbeat_alive = true;
     last_heartbeat_time = millis();
     Serial.println("[UART] Heartbeat");
+    oled.showSerialMessage("[UART] Heartbeat");
   }
   else {
     Serial.print("[UART] Unknown packet data: ");
