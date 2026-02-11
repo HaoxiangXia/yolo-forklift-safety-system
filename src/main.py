@@ -12,12 +12,48 @@ from logic import DualROIAlarm
 from logger import RunLogger, debug_print
 
 
+# --- UART 优化部分 ---
+# 预缓存常用包
+# ALARM:1 -> A(65)+L(76)+A(65)+R(82)+M(77)+:(58)+1(49) = 472 % 256 = 216 (D8)
+MSG_ALARM_ON = b"<ALARM:1,D8>"
+# ALARM:0 -> A(65)+L(76)+A(65)+R(82)+M(77)+:(58)+0(48) = 471 % 256 = 215 (D7)
+MSG_ALARM_OFF = b"<ALARM:0,D7>"
+# HB -> H(72)+B(66) = 138 % 256 = 138 (8A)
+MSG_HB = b"<HB,8A>"
+
+def calculate_checksum(data):
+    """计算轻量级校验和：所有字节累加对 256 取模。"""
+    if isinstance(data, str):
+        data = data.encode('ascii')
+    return sum(data) % 256
+
+def send_packet(cmd_data):
+    """高性能组包并发送 UART 数据。格式：<数据内容,十六进制校验和>"""
+    if not uart1:
+        return
+
+    try:
+        if cmd_data == "ALARM:1":
+            packet = MSG_ALARM_ON
+        elif cmd_data == "ALARM:0":
+            packet = MSG_ALARM_OFF
+        elif cmd_data == "HB":
+            packet = MSG_HB
+        else:
+            # 动态构建
+            checksum = calculate_checksum(cmd_data)
+            packet = f"<{cmd_data},{checksum:02X}>".encode()
+        
+        uart1.write(packet)
+    except Exception as e:
+        logger.log_uart_failure(reason="uart_write_failed", extra=f"cmd={cmd_data},error={e}")
+
 def on_alarm_change(alarm_state: bool, center_raw: bool, outer_raw: bool,
                     center_state: bool, outer_state: bool,
                     center_counter, outer_counter,
                     prev_alarm_state: bool, trigger_reason: str):
     """当报警状态改变时发送 UART 输出并记录日志。"""
-    uart_data = b'1' if alarm_state else b'0'
+    cmd_data = "ALARM:1" if alarm_state else "ALARM:0"
     log_output = "ALARM: ON" if alarm_state else "ALARM: OFF"
     print(f"[STATE CHANGE] {log_output}")
 
@@ -35,12 +71,8 @@ def on_alarm_change(alarm_state: bool, center_raw: bool, outer_raw: bool,
         outer_counter=outer_counter
     )
 
-    if uart1:
-        try:
-            uart1.write(uart_data)
-        except Exception as e:
-            # 使用新的专用日志函数
-            logger.log_uart_failure(reason="uart_write_failed", extra=f"data={uart_data},error={e}")
+    # 使用优化后的发送函数
+    send_packet(cmd_data)
 
 # ===================== 初始化 =====================
 print("[INFO] 开始初始化 MaixCAM 系统...")
@@ -125,6 +157,15 @@ try:
         # 3. 绘制检测框
         for box in person_boxes:
             img.draw_rect(box.x, box.y, box.w, box.h, color=image.COLOR_RED, thickness=2)
+
+        # 3.1 定期发送心跳包 (例如每 5 秒)
+        if 'last_hb_time' not in globals():
+            global last_hb_time
+            last_hb_time = 0
+        
+        if time.time() - last_hb_time > 5.0:
+            send_packet("HB")
+            last_hb_time = time.time()
 
         # 4. 状态机逻辑判定
         frame_w = img.width()

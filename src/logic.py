@@ -15,8 +15,8 @@ class DebounceStateMachine:
         self.on_frames = max(1, int(on_frames))
         self.off_frames = max(1, int(off_frames))
         self.state = bool(initial_state)
-        self._on_count = 0
-        self._off_count = 0
+        self.on_count = 0
+        self.off_count = 0
 
     def update(self, raw: bool) -> bool:
         """
