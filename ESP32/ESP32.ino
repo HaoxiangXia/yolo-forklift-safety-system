@@ -14,7 +14,14 @@ OLED_Display oled;
 // 接收状态机状态定义
 enum UartState {
   STATE_IDLE,      // 空闲：等待 '<'
-  STATE_RECEIVING  // 接收中：等待 '>'
+  STATE_RECEIVING, // 接收中：等待 '>'
+  STATE_DISCARD    // 丢弃模式：发生溢出后丢弃直到下一个 '<'
+};
+
+enum CommState {
+  WAIT_FIRST_HB, // 开机后等待首次心跳
+  COMM_OK,       // 已收到心跳，通信正常
+  COMM_TIMEOUT   // 已收到过心跳，但超时未再收到
 };
 
 UartState uart_state = STATE_IDLE;
@@ -24,9 +31,13 @@ unsigned long packet_start_time = 0; // 包开始接收时间
 
 bool serial_alarm = false;
 bool key_alarm = false;
-bool heartbeat_alive = false;
+CommState comm_state = WAIT_FIRST_HB;
 
 unsigned long last_heartbeat_time = 0;
+
+int last_key_state = HIGH;
+int key_stable_state = HIGH;
+unsigned long last_key_change_time = 0;
 
 HardwareSerial MySerial(1);
 
@@ -41,8 +52,12 @@ void setup() {
   digitalWrite(OUT_PIN, LOW);
   digitalWrite(BUZZER_PIN, HIGH);
 
-  last_heartbeat_time = millis();
-  heartbeat_alive = true; //避免开机就报警
+  last_heartbeat_time = 0;
+  comm_state = WAIT_FIRST_HB;
+
+  last_key_state = digitalRead(KEY_PIN);
+  key_stable_state = last_key_state;
+  last_key_change_time = millis();
 
   // 初始化OLED
   if (!oled.begin()) {
@@ -70,20 +85,16 @@ uint8_t calculateChecksum(const char* data, uint8_t len) {
  * @param len 数据长度
  */
 void parsePacket(char* packet, uint8_t len) {
-  // 查找最后一个逗号，判断是否有校验和
-  char* commaPtr = strrchr(packet, ',');
-  char* dataStart = packet + 1; // 跳过起始符 '<'
-  
-  if (commaPtr != NULL) {
-    // 存在校验和格式 <DATA,CS>
-    *commaPtr = '\0'; // 将逗号替换为结束符，暂时切分字符串以计算数据部分的校验和
-    
-    char* checksumPart = commaPtr + 1;
-    // 去掉末尾可能的 '>' 以解析校验和数值
-    char* endBracket = strchr(checksumPart, '>');
-    if (endBracket) *endBracket = '\0';
+  if (len < 3) return; 
 
-    uint8_t receivedSum = (uint8_t)strtol(checksumPart, NULL, 16);
+  char* dataStart = packet + 1; 
+  char* commaPos = strchr(dataStart, ',');
+
+  if (commaPos != NULL) {
+    // 含有校验和，将其截断以便处理数据部分
+    *commaPos = '\0';
+    char* checksumStr = commaPos + 1;
+    uint8_t receivedSum = (uint8_t)strtol(checksumStr, NULL, 16);
     uint8_t calculatedSum = calculateChecksum(dataStart, strlen(dataStart));
     
     if (receivedSum != calculatedSum) {
@@ -109,7 +120,7 @@ void parsePacket(char* packet, uint8_t len) {
     Serial.println("[UART] Alarm OFF");
   }
   else if (strcmp(dataStart, "HB") == 0) {
-    heartbeat_alive = true;
+    comm_state = COMM_OK;
     last_heartbeat_time = millis();
     Serial.println("[UART] Heartbeat");
     oled.println("[UART] Heartbeat");
@@ -135,6 +146,16 @@ void handleSerialReceive() {
   while (MySerial.available()) {
     char c = MySerial.read();
 
+    if (uart_state == STATE_DISCARD) {
+      if (c == '<') {
+        uart_state = STATE_RECEIVING;
+        packet_index = 0;
+        packet_start_time = millis();
+        packet_buffer[packet_index++] = c;
+      }
+      continue;
+    }
+
     if (c == '<') {
       // 发现起始符，开始接收
       uart_state = STATE_RECEIVING;
@@ -146,7 +167,7 @@ void handleSerialReceive() {
       // 3. 溢出检查：防止 packet_index 越界（留一个位置给结束符或 null）
       if (packet_index >= MAX_PACKET_LEN - 1) {
         Serial.println("[UART_ERROR] Buffer overflow, packet too long");
-        uart_state = STATE_IDLE;
+        uart_state = STATE_DISCARD;
         packet_index = 0;
         continue;
       }
@@ -155,7 +176,7 @@ void handleSerialReceive() {
 
       if (c == '>') {
         // 4. 发现结束符，进行解析
-        packet_buffer[packet_index] = '\0'; // 结尾补零方便转 String 或打印
+        packet_buffer[packet_index] = '\0'; // 结尾补零方便处理
         parsePacket(packet_buffer, packet_index);
         uart_state = STATE_IDLE;
         packet_index = 0;
@@ -165,24 +186,35 @@ void handleSerialReceive() {
 }
 
 void loop() {
+  unsigned long now = millis();
 
   /* ---------- 串口接收处理 ---------- */
   handleSerialReceive();
 
   /* ---------- 心跳超时检测 ---------- */
-  if (millis() - last_heartbeat_time > HEARTBEAT_TIMEOUT) {
-    heartbeat_alive = false;
+  // 仅在 COMM_OK 状态下检查超时
+  if (comm_state == COMM_OK && (now - last_heartbeat_time > HEARTBEAT_TIMEOUT)) {
+    comm_state = COMM_TIMEOUT;
   }
 
-  /* ---------- 按键触发 ---------- */
-  if (digitalRead(KEY_PIN) == LOW) {
-    key_alarm = true;
-  } else {
-    key_alarm = false;
+  /* ---------- 按键触发（20ms 防抖） ---------- */
+  int current_key_state = digitalRead(KEY_PIN);
+  if (current_key_state != last_key_state) {
+    last_key_change_time = now;
+    last_key_state = current_key_state;
   }
+
+  if ((now - last_key_change_time) > 20 && key_stable_state != last_key_state) {
+    key_stable_state = last_key_state;
+  }
+
+  key_alarm = (key_stable_state == LOW);
 
   /* ---------- 报警逻辑 ---------- */
-  bool comm_fault = !heartbeat_alive;  // 通信故障
+  // WAIT_FIRST_HB  → 不报警
+  // COMM_OK        → 正常逻辑
+  // COMM_TIMEOUT   → 强制报警（通信故障）
+  bool comm_fault = (comm_state == COMM_TIMEOUT);
   bool alarm_active = serial_alarm || key_alarm || comm_fault;
 
   if (alarm_active) {
@@ -192,6 +224,4 @@ void loop() {
     digitalWrite(OUT_PIN, LOW);
     digitalWrite(BUZZER_PIN, HIGH);   // 蜂鸣器停
   }
-
-  delay(10);  // 轻微防抖
 }

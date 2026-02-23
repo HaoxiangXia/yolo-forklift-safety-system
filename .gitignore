@@ -4,3 +4,7 @@ logs/
 # yolo模型
 *.pt
 *.onnx
+
+# 没人看ignore吧
+*.lnk
+ESP32/*.md
