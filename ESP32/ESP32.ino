@@ -13,19 +13,22 @@
 #define PACKET_TIMEOUT_MS 100    // 包接收超时（毫秒）
 #define HEARTBEAT_TIMEOUT 5000   // 心跳超时时间（毫秒）
 
-#define MQTT_KEEPALIVE  60
+#define MQTT_INTERVAL       3000   // MQTT 发布周期（毫秒）
+#define WIFI_RETRY_INTERVAL 5000   // WiFi 重连尝试间隔（毫秒）
+#define MQTT_RETRY_INTERVAL 5000   // MQTT 重连尝试间隔（毫秒）
+
+#define MQTT_KEEPALIVE    60
+#define KEY_DEBOUNCE_MS   20     // 按键消抖时间（毫秒）
+#define TIME_ZONE_OFFSET  8      // 东八区 (8 * 3600)
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 unsigned long last_mqtt_publish = 0;
-const unsigned long MQTT_INTERVAL = 3000; // 3秒
 
 // 非阻塞重连相关变量
 unsigned long last_wifi_retry_time = 0;
-const unsigned long WIFI_RETRY_INTERVAL = 5000; // WiFi 重连间隔 5秒
 unsigned long last_mqtt_retry_time = 0;
-const unsigned long MQTT_RETRY_INTERVAL = 5000; // MQTT 重连间隔 5秒
 
 // 创建OLED对象，使用默认引脚21(SDA)、22(SCL)，地址0x3C
 OLED_Display oled;
@@ -256,7 +259,7 @@ void connectMQTT() {
 
 //时间初始化（用于生成 timestamp）
 void initTime() {
-  configTime(8 * 3600, 0, "pool.ntp.org");  // 东八区
+  configTime(TIME_ZONE_OFFSET * 3600, 0, "pool.ntp.org");  // 设置时区
 }
 
 // 获取时间字符串
@@ -305,7 +308,7 @@ void loop() {
     last_key_state = current_key_state;
   }
 
-  if ((now - last_key_change_time) > 20 && key_stable_state != last_key_state) {
+  if ((now - last_key_change_time) > KEY_DEBOUNCE_MS && key_stable_state != last_key_state) {
     key_stable_state = last_key_state;
   }
 
