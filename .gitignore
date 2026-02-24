@@ -5,6 +5,9 @@ logs/
 *.pt
 *.onnx
 
+# ESP32敏感信息
+secrets.h
+
 # 没人看ignore吧
 *.lnk
 ESP32/*.md

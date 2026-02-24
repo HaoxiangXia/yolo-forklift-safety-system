@@ -1,0 +1,10 @@
+#pragma once
+
+// WIFI
+#define WIFI_SSID     "YOUR_WIFI"
+#define WIFI_PASSWORD "YOUR_PASSWORD"
+
+// MQTT
+#define MQTT_BROKER   "YOUR_BROKER_IP"
+#define MQTT_PORT     YOUR_BROKER_PORT
+#define DEVICE_ID     "FORK-XXX"
