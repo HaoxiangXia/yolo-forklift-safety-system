@@ -1,4 +1,4 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <time.h>
@@ -20,6 +20,12 @@ PubSubClient mqttClient(espClient);
 
 unsigned long last_mqtt_publish = 0;
 const unsigned long MQTT_INTERVAL = 3000; // 3秒
+
+// 非阻塞重连相关变量
+unsigned long last_wifi_retry_time = 0;
+const unsigned long WIFI_RETRY_INTERVAL = 5000; // WiFi 重连间隔 5秒
+unsigned long last_mqtt_retry_time = 0;
+const unsigned long MQTT_RETRY_INTERVAL = 5000; // MQTT 重连间隔 5秒
 
 // 创建OLED对象，使用默认引脚21(SDA)、22(SCL)，地址0x3C
 OLED_Display oled;
@@ -78,7 +84,9 @@ void setup() {
   last_key_change_time = millis();
 
   // 6. 连接网络、MQTT、同步时间
-  connectWiFi();
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD); //setup只触发初次连接，非阻塞不等待
+  last_wifi_retry_time = millis();
+  
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   initTime();
 
@@ -168,7 +176,8 @@ void handleSerialReceive() {
 
   // 2. 循环读取可用数据
   while (MySerial.available()) {
-    char c = MySerial.read();
+    int ch = MySerial.read();
+    if (ch >= 0) char c = ch;
 
     if (uart_state == STATE_DISCARD) {
       if (c == '<') {
@@ -213,33 +222,34 @@ void handleSerialReceive() {
 void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting WiFi");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  unsigned long now = millis();
+  if (now - last_wifi_retry_time > WIFI_RETRY_INTERVAL) {
+    last_wifi_retry_time = now;
+    Serial.println("Attempting WiFi connection...");
+    if (WiFi.status() != WL_CONNECTED)
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   }
-
-  Serial.println("\nWiFi Connected");
 }
 
 //MQTT 连接函数
 void connectMQTT() {
   if (mqttClient.connected()) return;
 
-  while (!mqttClient.connected()) {
-    Serial.print("Connecting MQTT...");
-    if (WiFi.status() != WL_CONNECTED) {
-      connectWiFi();  // 先连WiFi
-      return;         // 下次loop再试MQTT
-    }
+  // 必须先确保 WiFi 已连接
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+    return;
+  }
+
+  unsigned long now = millis();
+  if (now - last_mqtt_retry_time > MQTT_RETRY_INTERVAL) {
+    last_mqtt_retry_time = now;
+    Serial.print("Attempting MQTT connection...");
     if (mqttClient.connect(DEVICE_ID)) {
       Serial.println("Connected");
     } else {
       Serial.print("Failed, rc=");
       Serial.println(mqttClient.state());
-      delay(2000);
     }
   }
 }
@@ -316,11 +326,11 @@ void loop() {
     digitalWrite(BUZZER_PIN, HIGH);   // 蜂鸣器停
   }
 
-  connectWiFi();
   connectMQTT();
   mqttClient.loop();
 
-  if (millis() - last_mqtt_publish > MQTT_INTERVAL) {
+  // 确保在断网期间不会尝试发布操作
+  if (mqttClient.connected() && (millis() - last_mqtt_publish > MQTT_INTERVAL)) {
     last_mqtt_publish = millis();
 
     int alarm_state = alarm_active ? 1 : 0;
