@@ -8,6 +8,11 @@ logs/
 # ESP32敏感信息
 secrets.h
 
+# 缓存
+__pycache__/
+
 # 没人看ignore吧
 *.lnk
 ESP32/*.md
+AGENTS.md
+.kilocode/

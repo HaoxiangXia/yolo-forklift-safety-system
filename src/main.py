@@ -1,8 +1,9 @@
-"""
+﻿"""
 MaixCAM 人员入侵检测系统 - 主程序
 整合 camera, display, detector, logic, logger 模块，运行主循环
 """
 # -*- coding: utf-8 -*-
+import os
 import sys
 import time
 from maix import camera, display, image, uart, pinmap, err
@@ -10,9 +11,13 @@ import config
 from detector import Detector
 from logic import DualROIAlarm
 from logger import RunLogger, debug_print
+from cloud_reporter import CloudReporter
 
 # ===================== 全局变量 =====================
 LAST_HEARTBEAT_TIME_S = 0.0     # 心跳包时间戳（上次发送时间）
+LAST_SNAPSHOT_TIME_S = 0.0      # 1 FPS 缓存快照时间
+SNAPSHOT_RING = []              # 磁盘环形缓冲路径列表
+LAST_RETRY_TICK_S = 0.0         # 图片补传队列上次轮询时间
 
 def calculate_checksum(data):
     """计算轻量级校验和：所有字节累加对 256 取模。"""
@@ -41,10 +46,40 @@ def send_packet(cmd_data):
     except Exception as e:
         logger.log_uart_failure(reason="uart_write_failed", extra=f"cmd={cmd_data},error={e}")
 
+def _try_delete_snapshot(path):
+    if not path:
+        return
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        logger.log_runtime_exception(reason="snapshot_delete_failed", extra=f"path={path},error={e}")
+
+def _append_snapshot(path):
+    global SNAPSHOT_RING
+    if not path:
+        return
+    SNAPSHOT_RING.append(path)
+    max_len = getattr(config, "RING_BUFFER_SIZE", 60)
+    while len(SNAPSHOT_RING) > max_len:
+        dropped = SNAPSHOT_RING.pop(0)
+        _try_delete_snapshot(dropped)
+
+def _get_recent_snapshots():
+    pre_frames = getattr(config, "PRE_ALARM_FRAMES", 3)
+    need = pre_frames + 1
+    if need <= 0:
+        need = 1
+    if not SNAPSHOT_RING:
+        return []
+    if len(SNAPSHOT_RING) <= need:
+        return list(SNAPSHOT_RING)
+    return SNAPSHOT_RING[-need:]
+
 def on_alarm_change(alarm_state: bool, center_raw: bool, outer_raw: bool,
                     center_state: bool, outer_state: bool,
                     center_counter, outer_counter,
-                    prev_alarm_state: bool, trigger_reason: str):
+                    prev_alarm_state: bool, trigger_reason: str, img=None):
     """当报警状态改变时发送 UART 输出并记录日志。"""
     cmd_data = "ALARM:1" if alarm_state else "ALARM:0"
     log_output = "ALARM: ON" if alarm_state else "ALARM: OFF"
@@ -67,6 +102,50 @@ def on_alarm_change(alarm_state: bool, center_raw: bool, outer_raw: bool,
     # 使用优化后的发送函数
     send_packet(cmd_data)
 
+    # 云端上报：仅由 MaixCam 发送 MQTT，ESP32 保留本地执行功能。
+    if not cloud_reporter:
+        return
+
+    event_ts = cloud_reporter.make_timestamp()
+    image_urls = None
+
+    # 仅在 0->1 报警触发时抓图上传；1->0 清警不上报图片。
+    # 注意：使用异步上传避免阻塞主循环，图片通过 tick_retry() 后台补传
+    if (not prev_alarm_state) and alarm_state:
+        snapshot_path = cloud_reporter.save_snapshot(img=img, event_ts=event_ts)
+        if snapshot_path:
+            _append_snapshot(snapshot_path)
+
+        recent_paths = _get_recent_snapshots()
+        if recent_paths:
+            # 异步处理：将图片加入重试队列，避免阻塞主循环
+            # 图片将在 tick_retry() 中后台上传
+            for path in recent_paths:
+                cloud_reporter.enqueue_retry(path, event_ts)
+            # 首次立即尝试上传获取 URL（非阻塞快速尝试）
+            image_urls = cloud_reporter.upload_images_batch(recent_paths, base_timestamp=event_ts)
+            if image_urls is None:
+                # 上传失败时记录日志，但已加入重试队列，后续会补传
+                logger.log_runtime_exception(
+                    reason="image_batch_upload_failed_async",
+                    extra="alarm_raised_queued_for_retry"
+                )
+        else:
+            logger.log_runtime_exception(
+                reason="snapshot_missing_before_publish",
+                extra="alarm_raised_but_no_snapshot"
+            )
+    publish_ok = cloud_reporter.publish_alarm(
+        alarm=int(alarm_state),
+        timestamp=event_ts,
+        image_urls=image_urls
+    )
+    if not publish_ok:
+        logger.log_runtime_exception(
+            reason="mqtt_publish_failed",
+            extra=f"alarm={int(alarm_state)},timestamp={event_ts}"
+        )
+
 # ===================== 初始化 =====================
 print("[INFO] 开始初始化 MaixCAM 系统...")
 
@@ -76,6 +155,19 @@ logger = RunLogger(
     input_res=config.INPUT_SIZE
 )
 print("[OK] 日志模块初始化成功")
+
+# 1.1 初始化云上报模块（HTTP 上传 + MQTT 发布 + 失败补传）
+cloud_reporter = None
+try:
+    cloud_reporter = CloudReporter(logger=logger)
+    print("[OK] 云上报模块初始化成功")
+    # 启动阶段立即尝试一次 MQTT 连接，失败则直接打印告警。
+    if not cloud_reporter.ensure_mqtt_connected():
+        print("[ALARM] MQTT 启动连接失败：请检查 broker 地址/端口/网络状态")
+except Exception as e:
+    print(f"[WARN] 云上报模块初始化失败，将仅保留 UART 本地链路: {e}")
+    print("[ALARM] MQTT 模块初始化失败：云端上报不可用")
+    logger.log_init_failure("cloud_reporter", str(e))
 
 # 2. 串口初始化 (用于状态输出)
 uart1 = None
@@ -124,6 +216,7 @@ except Exception as e:
 print("[BOOT] 启动主循环")
 
 try:
+    global LAST_SNAPSHOT_TIME_S, LAST_RETRY_TICK_S
     while True:
         # 帧开始时间，用于 FPS 统计
         frame_start_s = time.time()
@@ -137,6 +230,16 @@ try:
         if img is None:
             debug_print("Camera returned None image, skipping frame.")
             continue
+
+        # 1 FPS 缓存快照（磁盘环形缓冲）
+        snapshot_fps = getattr(config, "SNAPSHOT_FPS", 1)
+        snapshot_interval_s = 1.0 / snapshot_fps if snapshot_fps > 0 else 1.0
+        if cloud_reporter and (frame_start_s - LAST_SNAPSHOT_TIME_S >= snapshot_interval_s):
+            snapshot_ts = cloud_reporter.make_timestamp()
+            snapshot_path = cloud_reporter.save_snapshot(img=img, event_ts=snapshot_ts)
+            if snapshot_path:
+                _append_snapshot(snapshot_path)
+                LAST_SNAPSHOT_TIME_S = frame_start_s
         
         # 2. 模型推理
         nn_start_s = time.time()
@@ -180,7 +283,8 @@ try:
                 center_counter=c_cnt,
                 outer_counter=o_cnt,
                 prev_alarm_state=prev_alarm_state,
-                trigger_reason=trigger_reason
+                trigger_reason=trigger_reason,
+                img=img
             )
 
 
@@ -214,6 +318,11 @@ try:
         if disp_end_s - LAST_HEARTBEAT_TIME_S > config.HEARTBEAT_INTERVAL_S:
             send_packet("HB")
             LAST_HEARTBEAT_TIME_S = frame_start_s
+
+        # 6.1 后台补传轮询：每秒检查一次，避免阻塞主循环
+        if cloud_reporter and (frame_start_s - LAST_RETRY_TICK_S > 1.0):
+            cloud_reporter.tick_retry()
+            LAST_RETRY_TICK_S = frame_start_s
         
         # 7. 记录本帧耗时到日志模块
         other_time_s = (time.time() - frame_start_s) - (cam_time_s + nn_time_s + disp_time_s)
@@ -243,6 +352,11 @@ finally:
         except Exception as e:
             # 使用新的 log_uart_failure 函数
             logger.log_uart_failure(reason="uart_close_failed", extra=str(e))
+    if cloud_reporter:
+        try:
+            cloud_reporter.deinit()
+        except Exception as e:
+            logger.log_runtime_exception(reason="cloud_reporter_deinit_failed", extra=str(e))
     detector.deinit()
     if cam:
         try:
