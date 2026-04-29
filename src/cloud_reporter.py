@@ -312,6 +312,9 @@ class CloudReporter:
             return
         try:
             if self._mqtt_backend == "paho":
+                if getattr(self, "_loop_started", False):
+                    self._mqtt_client.loop_stop(force=False)
+                    self._loop_started = False
                 self._mqtt_client.disconnect()
             self._mqtt_connected = False
         except Exception as e:
@@ -465,7 +468,9 @@ class CloudReporter:
 
                 # 启动网络循环线程，保证心跳与回调正常工作。
                 try:
-                    self._mqtt_client.loop_start()
+                    if not self._loop_started:
+                        self._mqtt_client.loop_start()
+                        self._loop_started = True
                 except Exception as loop_e:
                     self._log_runtime("mqtt_loop_start_failed", str(loop_e))
 
