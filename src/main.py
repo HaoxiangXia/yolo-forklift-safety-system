@@ -216,7 +216,6 @@ except Exception as e:
 print("[BOOT] 启动主循环")
 
 try:
-    global LAST_SNAPSHOT_TIME_S, LAST_RETRY_TICK_S
     while True:
         # 帧开始时间，用于 FPS 统计
         frame_start_s = time.time()
