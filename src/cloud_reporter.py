@@ -74,7 +74,8 @@ class CloudReporter:
 
         ts = event_ts if event_ts else self.make_timestamp()
         safe_ts = ts.replace(":", "-").replace(" ", "_")
-        filename = "%s_%s.jpg" % (self.device_id, safe_ts)
+        ms = int(time.time() * 1000) % 1000
+        filename = "%s_%s_%03d.jpg" % (self.device_id, safe_ts, ms)
         file_path = os.path.join(self.alarm_image_dir, filename)
 
         try:
